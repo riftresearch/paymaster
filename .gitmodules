@@ -1,0 +1,3 @@
+[submodule "hypernode"]
+	path = hypernode
+	url = https://github.com/rift-labs-inc/hypernode
