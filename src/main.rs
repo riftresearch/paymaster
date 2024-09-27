@@ -101,13 +101,13 @@ async fn main() {
         .layer(
             CorsLayer::new()
                 .allow_origin("http://localhost:3000".parse::<HeaderValue>().unwrap())
-                .allow_origin("https://rift.exchange".parse::<HeaderValue>().unwrap())
+                // .allow_origin("https://rift.exchange".parse::<HeaderValue>().unwrap())
                 .allow_methods([Method::GET, Method::POST])
                 .allow_headers(vec![header::CONTENT_TYPE]),
         )
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:6000")
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:4000")
         .await
         .unwrap();
     tracing::debug!("Reservation Paymaster API on http://{}", listener.local_addr().unwrap());
