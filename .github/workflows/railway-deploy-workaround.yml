@@ -1,0 +1,28 @@
+name: "Pull submodule / Push to deploy branch"
+on:
+  push:
+    branches:
+      - main
+jobs:
+  pull_submodule_and_deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          submodules: true
+      - name: Update commit author
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'          
+      - name: Push to deploy branch
+        run: |
+          git checkout -b deploy
+          git rm --cached hypernode 
+          git rm .gitmodules
+          rm -rf hypernode/.git
+          rm -rf hypernode/circuits/.git
+          rm -rf hypernode/contracts/.git
+          rm -rf hypernode/data-aggregation-contracts/.git
+          git add hypernode 
+          git commit -m "Checkout repo + submodule, add all and commit"
+          git push origin deploy -f  
