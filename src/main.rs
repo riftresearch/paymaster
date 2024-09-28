@@ -111,7 +111,7 @@ async fn main() {
         )
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:4000")
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:4000")
         .await
         .unwrap();
     tracing::debug!("Reservation Paymaster API on http://{}", listener.local_addr().unwrap());
