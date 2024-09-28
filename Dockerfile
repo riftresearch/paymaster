@@ -48,4 +48,3 @@ EXPOSE 4000
 
 # Specify the command to run the app and ensure it picks up environment variables
 CMD ["./reservation-paymaster"]
-
