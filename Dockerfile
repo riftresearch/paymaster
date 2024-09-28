@@ -4,28 +4,15 @@ FROM rust:1.81-slim-bullseye AS builder
 # Set the working directory inside the container
 WORKDIR /usr/src/app
 
-# Install necessary packages for building with OpenSSL and git to handle submodules
+# Install necessary packages for building with OpenSSL, git, and handling submodules
 RUN apt-get update && apt-get install -y \
     git \
     pkg-config \
     libssl-dev \
     build-essential
 
-# Copy the Cargo files and project structure
-COPY Cargo.toml Cargo.lock ./
-
-# Copy the submodule (hypernode) Cargo files first for caching purposes
-COPY hypernode/Cargo.toml hypernode/Cargo.lock ./hypernode/
-
-# Initialize and update git submodules
-COPY .git .git
-RUN git submodule update --init --recursive
-
-# Copy the entire project, excluding the TypeScript bindings
-COPY . .
-
-# Exclude the TypeScript bindings folder by removing it
-RUN rm -rf ./bindings
+# Clone the main repository and initialize submodules
+RUN git clone --recursive https://github.com/rift-labs-inc/paymaster /usr/src/app
 
 # Build the actual project using the specified Rust version
 RUN cargo build --release
