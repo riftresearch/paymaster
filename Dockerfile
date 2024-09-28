@@ -17,18 +17,21 @@ COPY Cargo.toml Cargo.lock ./
 # Copy the submodule (hypernode) Cargo files first for caching purposes
 COPY hypernode/Cargo.toml hypernode/Cargo.lock ./hypernode/
 
-# Copy the entire project, excluding the TypeScript bindings
-COPY . .
-
 # Initialize and update git submodules
 COPY .git .git
 RUN git submodule update --init --recursive
 
+# Copy the entire project, excluding the TypeScript bindings
+COPY . .
+
+# Exclude the TypeScript bindings folder by removing it
+RUN rm -rf ./bindings
+
 # Build the actual project using the specified Rust version
 RUN cargo build --release
 
-# Stage 2: Create the runtime image
-FROM debian:buster-slim
+# Stage 2: Create the runtime image using debian:bullseye-slim
+FROM debian:bullseye-slim
 
 # Install necessary dependencies (libssl-dev for OpenSSL runtime)
 RUN apt-get update && apt-get install -y \
