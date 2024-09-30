@@ -97,7 +97,7 @@ async fn main() {
 
     let origins = [
         "http://localhost:3000".parse::<HeaderValue>().unwrap(),
-        "https://rift.exchange".parse().unwrap()
+        "https://app.rift.exchange".parse().unwrap()
     ];
 
     let app = Router::new()
