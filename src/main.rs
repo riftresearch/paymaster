@@ -15,8 +15,11 @@ use axum::{
 };
 use clap::Parser;
 use hypernode::core::{EvmHttpProvider, RiftExchange};
+use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::{str::FromStr, sync::Arc};
+use std::{str::FromStr, sync::Arc, time::Duration};
+use tokio::sync::mpsc;
+use tokio::sync::oneshot;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use ts_rs::TS;
@@ -60,6 +63,12 @@ struct ReservationByPaymasterResponse {
 struct AppState {
     contract: Arc<hypernode::core::RiftExchangeHttp>,
     evm_http_rpc: String,
+    request_sender: mpsc::Sender<ReservationRequest>,
+}
+
+struct ReservationRequest {
+    request: ReservationByPaymasterRequest,
+    response_sender: oneshot::Sender<Result<String, String>>,
 }
 
 #[tokio::main]
@@ -87,13 +96,22 @@ async fn main() {
             .on_http(args.evm_http_rpc.parse::<Url>().unwrap()),
     );
 
+    let (request_sender, request_receiver) = mpsc::channel::<ReservationRequest>(100);
+
     let state = AppState {
         contract: Arc::new(RiftExchange::new(
             alloy::primitives::Address::from_str(&args.rift_exchange_address).unwrap(),
             provider.clone(),
         )),
-        evm_http_rpc: args.evm_http_rpc,
+        evm_http_rpc: args.evm_http_rpc.clone(),
+        request_sender,
     };
+
+    // Spawn the queue processor
+    let queue_state = state.clone();
+    tokio::spawn(async move {
+        process_queue(queue_state, request_receiver).await;
+    });
 
     let origins = [
         "http://localhost:3000".parse::<HeaderValue>().unwrap(),
@@ -119,6 +137,15 @@ async fn main() {
     axum::serve(listener, app).await.unwrap();
 }
 
+async fn process_queue(state: AppState, mut receiver: mpsc::Receiver<ReservationRequest>) {
+    while let Some(request) = receiver.recv().await {
+        let result = process_reservation(&state, request.request).await;
+        let _ = request
+            .response_sender
+            .send(result.map_err(|e| e.to_string()));
+    }
+}
+
 async fn index() -> Html<&'static str> {
     Html(std::include_str!("../index.html"))
 }
@@ -127,7 +154,24 @@ async fn reserve_paymaster(
     State(state): State<AppState>,
     Json(request): Json<ReservationByPaymasterRequest>,
 ) -> impl IntoResponse {
-    let result = process_reservation(&state, request).await;
+    let (response_sender, response_receiver) = oneshot::channel();
+    let reservation_request = ReservationRequest {
+        request,
+        response_sender,
+    };
+
+    if let Err(_) = state.request_sender.send(reservation_request).await {
+        return Json(ReservationByPaymasterResponse {
+            status: false,
+            tx_hash: None,
+            error: Some("Failed to queue request".to_string()),
+        });
+    }
+
+    let result = response_receiver
+        .await
+        .unwrap_or_else(|_| Err("Request processing failed".to_string()));
+
     Json(match result {
         Ok(tx_hash) => ReservationByPaymasterResponse {
             status: true,
@@ -137,7 +181,7 @@ async fn reserve_paymaster(
         Err(e) => ReservationByPaymasterResponse {
             status: false,
             tx_hash: None,
-            error: Some(e.to_string()),
+            error: Some(e),
         },
     })
 }
@@ -182,6 +226,9 @@ async fn process_reservation(
         tx_calldata,
         state.evm_http_rpc
     );
+
+    let delay = rand::thread_rng().gen_range(100..=1000);
+    tokio::time::sleep(Duration::from_millis(delay)).await;
 
     // Simulate the transaction
     tx_future.call().await.map_err(|e| {
