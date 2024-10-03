@@ -56,6 +56,7 @@ struct ReservationByPaymasterRequest {
 struct ReservationByPaymasterResponse {
     status: bool,
     tx_hash: Option<String>,
+    error: Option<String>,
 }
 
 #[derive(Clone)]
@@ -126,22 +127,23 @@ async fn reserve_paymaster(
     State(state): State<AppState>,
     Json(request): Json<ReservationByPaymasterRequest>,
 ) -> impl IntoResponse {
-    let result = process_reservation(state, request).await;
-
+    let result = process_reservation(&state, request).await;
     Json(match result {
         Ok(tx_hash) => ReservationByPaymasterResponse {
             status: true,
             tx_hash: Some(tx_hash),
+            error: None,
         },
-        Err(_) => ReservationByPaymasterResponse {
+        Err(e) => ReservationByPaymasterResponse {
             status: false,
             tx_hash: None,
+            error: Some(e.to_string()),
         },
     })
 }
 
 async fn process_reservation(
-    state: AppState,
+    state: &AppState,
     request: ReservationByPaymasterRequest,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let sender = Address::from_str(&request.sender)?;
@@ -173,8 +175,13 @@ async fn process_reservation(
         expired_swap_reservation_indexes,
     );
 
-    let tx = tx_future.send().await.unwrap();
-    let tx_hash = tx.tx_hash().clone().to_string();
+    // Simulate the transaction
+    tx_future.call().await?;
+
+    // Send the transaction
+    let tx = tx_future.send().await?;
+    let tx_hash = tx.tx_hash().to_string();
     tracing::info!("Reserving w/ transaction hash: {}", tx_hash);
+    
     Ok(tx_hash)
 }
