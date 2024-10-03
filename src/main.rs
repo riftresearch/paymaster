@@ -16,10 +16,7 @@ use axum::{
 use clap::Parser;
 use hypernode::core::{EvmHttpProvider, RiftExchange};
 use serde::{Deserialize, Serialize};
-use std::{
-    str::FromStr,
-    sync::Arc,
-};
+use std::{str::FromStr, sync::Arc};
 use tower_http::cors::CorsLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use ts_rs::TS;
@@ -62,6 +59,7 @@ struct ReservationByPaymasterResponse {
 #[derive(Clone)]
 struct AppState {
     contract: Arc<hypernode::core::RiftExchangeHttp>,
+    evm_http_rpc: String,
 }
 
 #[tokio::main]
@@ -94,11 +92,12 @@ async fn main() {
             alloy::primitives::Address::from_str(&args.rift_exchange_address).unwrap(),
             provider.clone(),
         )),
+        evm_http_rpc: args.evm_http_rpc,
     };
 
     let origins = [
         "http://localhost:3000".parse::<HeaderValue>().unwrap(),
-        "https://app.rift.exchange".parse().unwrap()
+        "https://app.rift.exchange".parse().unwrap(),
     ];
 
     let app = Router::new()
@@ -112,10 +111,11 @@ async fn main() {
         )
         .with_state(state);
 
-    let listener = tokio::net::TcpListener::bind("0.0.0.0:4000")
-        .await
-        .unwrap();
-    tracing::debug!("Reservation Paymaster API on http://{}", listener.local_addr().unwrap());
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:4000").await.unwrap();
+    tracing::debug!(
+        "Reservation Paymaster API on http://{}",
+        listener.local_addr().unwrap()
+    );
     axum::serve(listener, app).await.unwrap();
 }
 
@@ -175,13 +175,37 @@ async fn process_reservation(
         expired_swap_reservation_indexes,
     );
 
+    let tx_calldata = tx_future.calldata();
+    let debug_command = format!(
+        "cast call {} --data {} --trace --rpc-url {}",
+        state.contract.address(),
+        tx_calldata,
+        state.evm_http_rpc
+    );
+
     // Simulate the transaction
-    tx_future.call().await?;
+    tx_future.call().await.map_err(|e| {
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!(
+                "Simulation Error: {:?}\nDebug Command: {}",
+                e, debug_command
+            ),
+        )) as Box<dyn std::error::Error>
+    })?;
 
     // Send the transaction
-    let tx = tx_future.send().await?;
+    let tx = tx_future.send().await.map_err(|e| {
+        Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!(
+                "Transaction Error: {:?}\nDebug Command: {}",
+                e, debug_command
+            ),
+        )) as Box<dyn std::error::Error>
+    })?;
     let tx_hash = tx.tx_hash().to_string();
     tracing::info!("Reserving w/ transaction hash: {}", tx_hash);
-    
+
     Ok(tx_hash)
 }
