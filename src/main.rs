@@ -222,6 +222,8 @@ async fn process_reservation(
         .get_transaction_count(state.sender_address)
         .await?;
 
+    tracing::info!("Calling with nonce: {}", nonce);
+
     let tx_future = state.contract.reserveLiquidity(
         sender,
         vault_indexes_to_reserve,
