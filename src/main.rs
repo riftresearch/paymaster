@@ -15,7 +15,6 @@ use axum::{
     Router,
 };
 use clap::Parser;
-use hypernode::core::{EvmHttpProvider, RiftExchange};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::{str::FromStr, sync::Arc, time::Duration};
@@ -24,6 +23,54 @@ use tokio::sync::oneshot;
 use tower_http::cors::CorsLayer;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 use ts_rs::TS;
+
+use alloy::network::Ethereum;
+use alloy::providers::fillers::{
+    ChainIdFiller, FillProvider, GasFiller, JoinFill, NonceFiller, WalletFiller,
+};
+use alloy::providers::RootProvider;
+use alloy::pubsub::PubSubFrontend;
+use alloy::sol;
+use alloy::transports::http::Http;
+use bitcoin::Block;
+use reqwest::Client;
+
+sol!(
+    #[allow(missing_docs)]
+    #[sol(rpc)]
+    #[derive(serde::Serialize, serde::Deserialize)]
+    RiftExchange,
+    "artifacts/RiftExchange.json"
+);
+
+pub type EvmWebsocketProvider = FillProvider<
+    JoinFill<
+        JoinFill<
+            JoinFill<JoinFill<alloy::providers::Identity, GasFiller>, NonceFiller>,
+            ChainIdFiller,
+        >,
+        WalletFiller<EthereumWallet>,
+    >,
+    RootProvider<PubSubFrontend>,
+    PubSubFrontend,
+    Ethereum,
+>;
+pub type EvmHttpProvider = FillProvider<
+    JoinFill<
+        JoinFill<
+            JoinFill<JoinFill<alloy::providers::Identity, GasFiller>, NonceFiller>,
+            ChainIdFiller,
+        >,
+        WalletFiller<EthereumWallet>,
+    >,
+    RootProvider<Http<Client>>,
+    Http<Client>,
+    Ethereum,
+>;
+
+pub type RiftExchangeWebsocket =
+    RiftExchange::RiftExchangeInstance<PubSubFrontend, Arc<EvmWebsocketProvider>>;
+pub type RiftExchangeHttp = RiftExchange::RiftExchangeInstance<Http<Client>, Arc<EvmHttpProvider>>;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -62,7 +109,7 @@ struct ReservationByPaymasterResponse {
 
 #[derive(Clone)]
 struct AppState {
-    contract: Arc<hypernode::core::RiftExchangeHttp>,
+    contract: Arc<RiftExchangeHttp>,
     sender_address: Address,
     evm_http_rpc: String,
     request_sender: mpsc::Sender<ReservationRequest>,
