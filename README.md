@@ -9,3 +9,5 @@ source .env && docker build \
   --build-arg RIFT_EXCHANGE_ADDRESS="$RIFT_EXCHANGE_ADDRESS" \
   -t reservation-paymaster .
 ```
+RIFT
+
