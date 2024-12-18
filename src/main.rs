@@ -1,3 +1,4 @@
+use alloy::providers::Provider;
 use alloy::{
     hex,
     network::EthereumWallet,
@@ -62,6 +63,7 @@ struct ReservationByPaymasterResponse {
 #[derive(Clone)]
 struct AppState {
     contract: Arc<hypernode::core::RiftExchangeHttp>,
+    sender_address: Address,
     evm_http_rpc: String,
     request_sender: mpsc::Sender<ReservationRequest>,
 }
@@ -103,6 +105,9 @@ async fn main() {
             alloy::primitives::Address::from_str(&args.rift_exchange_address).unwrap(),
             provider.clone(),
         )),
+        sender_address: PrivateKeySigner::from_bytes(&private_key.into())
+            .unwrap()
+            .address(),
         evm_http_rpc: args.evm_http_rpc.clone(),
         request_sender,
     };
@@ -210,6 +215,13 @@ async fn process_reservation(
         .map(|x| U256::from_str(x))
         .collect::<Result<Vec<U256>, _>>()?;
 
+    // Get the current nonce for the signer's address
+    let nonce = state
+        .contract
+        .provider()
+        .get_transaction_count(state.sender_address)
+        .await?;
+
     let tx_future = state.contract.reserveLiquidity(
         sender,
         vault_indexes_to_reserve,
@@ -241,16 +253,46 @@ async fn process_reservation(
         )) as Box<dyn std::error::Error>
     })?;
 
-    // Send the transaction
-    let tx = tx_future.send().await.map_err(|e| {
-        Box::new(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!(
-                "Transaction Error: {:?}\nDebug Command: {}",
-                e, debug_command
-            ),
-        )) as Box<dyn std::error::Error>
-    })?;
+    // Send the transaction with retry logic
+    let mut attempts = 0;
+    let max_attempts = 5;
+    let tx_future = tx_future.nonce(nonce);
+    let tx = loop {
+        match tx_future.send().await {
+            Ok(tx) => break tx,
+            Err(e) => {
+                // Check if it's a timeout error
+                if e.to_string().contains("request timeout") {
+                    attempts += 1;
+                    if attempts >= max_attempts {
+                        return Err(Box::new(std::io::Error::new(
+                            std::io::ErrorKind::Other,
+                            format!(
+                                "Transaction Error after {} attempts: {:?}\nDebug Command: {}",
+                                max_attempts, e, debug_command
+                            ),
+                        )) as Box<dyn std::error::Error>);
+                    }
+                    tracing::warn!(
+                        "Transaction timeout, attempt {}/{}, retrying in 1 second...",
+                        attempts,
+                        max_attempts
+                    );
+                    tokio::time::sleep(Duration::from_secs(1)).await;
+                    continue;
+                }
+                // If it's not a timeout error, return the error immediately
+                return Err(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!(
+                        "Transaction Error: {:?}\nDebug Command: {}",
+                        e, debug_command
+                    ),
+                )) as Box<dyn std::error::Error>);
+            }
+        }
+    };
+
     let tx_hash = tx.tx_hash().to_string();
     tracing::info!("Reserving w/ transaction hash: {}", tx_hash);
 
